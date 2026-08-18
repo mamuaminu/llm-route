@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Route — AI Model Router</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a25;
+    --border: #2a2a3a;
+    --accent: #7c6aff;
+    --accent2: #6affc7;
+    --text: #e0e0f0;
+    --text2: #8888a0;
+    --danger: #ff6a6a;
+    --success: #6affc7;
+    --warning: #ffcc6a;
+  }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  
+  /* Top nav */
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 100; }
+  .logo { font-size: 20px; font-weight: 700; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+  .logo span { color: var(--accent2); }
+  .nav-right { display: flex; gap: 12px; align-items: center; }
+  
+  /* Cost ticker */
+  .cost-ticker { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; font-size: 13px; display: flex; gap: 16px; }
+  .cost-ticker span { color: var(--text2); }
+  .cost-ticker strong { color: var(--accent2); }
+  
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .tab { padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--text2); background: none; border: none; transition: all 0.2s; }
+  .tab:hover { color: var(--text); background: var(--surface2); }
+  .tab.active { color: var(--accent); background: rgba(124,106,255,0.1); }
+  
+  /* Main layout */
+  .main { display: grid; grid-template-columns: 1fr 340px; gap: 0; height: calc(100vh - 110px); }
+  .panel { padding: 20px 24px; overflow-y: auto; }
+  .panel-right { border-left: 1px solid var(--border); background: var(--surface); }
+  
+  /* Chat panel */
+  #chat-messages { flex: 1; overflow-y: auto; padding-bottom: 16px; }
+  .msg { margin-bottom: 16px; }
+  .msg-user { text-align: right; }
+  .msg-bubble { max-width: 80%; display: inline-block; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+  .msg-user .msg-bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; text-align: left; }
+  .msg-assistant .msg-bubble { background: var(--surface2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg-meta { font-size: 11px; color: var(--text2); margin-top: 4px; display: flex; gap: 12px; }
+  .msg-routing { font-size: 11px; color: var(--accent2); margin-top: 4px; font-family: monospace; }
+  .msg-error .msg-bubble { background: rgba(255,106,106,0.1); border: 1px solid var(--danger); color: var(--danger); }
+  
+  /* Chat input */
+  .chat-input-area { position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 16px 24px; }
+  .chat-form { display: flex; gap: 10px; }
+  .chat-form textarea { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; color: var(--text); font-size: 14px; resize: none; font-family: inherit; outline: none; min-height: 48px; max-height: 200px; }
+  .chat-form textarea:focus { border-color: var(--accent); }
+  .send-btn { background: var(--accent); color: #fff; border: none; border-radius: 10px; padding: 0 20px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+  .send-btn:hover { opacity: 0.85; }
+  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  
+  .chat-options { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .opt { padding: 4px 10px; border-radius: 20px; font-size: 11px; border: 1px solid var(--border); background: none; color: var(--text2); cursor: pointer; }
+  .opt.selected { border-color: var(--accent); color: var(--accent); background: rgba(124,106,255,0.08); }
+  
+  /* Model pills */
+  .model-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .model-pill { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: monospace; border: 1px solid; }
+  .model-pill.openai { border-color: #6affc7; color: #6affc7; }
+  .model-pill.anthropic { border-color: #ff9a6a; color: #ff9a6a; }
+  .model-pill.gemini { border-color: #6ab0ff; color: #6ab0ff; }
+  
+  /* Stats grid */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .stat-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .stat-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .stat-value { font-size: 24px; font-weight: 700; color: var(--text); }
+  .stat-value.accent { color: var(--accent); }
+  .stat-value.success { color: var(--accent2); }
+  .stat-value.warning { color: var(--warning); }
+  
+  /* Chart */
+  .chart-container { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+  .chart-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text2); }
+  .bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 80px; }
+  .bar { flex: 1; border-radius: 3px 3px 0 0; min-height: 4px; transition: height 0.3s; }
+  
+  /* Provider breakdown */
+  .provider-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .provider-row:last-child { border-bottom: none; }
+  .provider-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .provider-name { flex: 1; font-size: 13px; }
+  .provider-req { font-size: 12px; color: var(--text2); }
+  .provider-cost { font-size: 13px; font-weight: 600; color: var(--accent2); }
+  
+  /* Models config */
+  .model-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; }
+  .model-info { flex: 1; }
+  .model-name { font-size: 14px; font-weight: 600; }
+  .model-meta { font-size: 11px; color: var(--text2); margin-top: 2px; font-family: monospace; }
+  .toggle { width: 36px; height: 20px; border-radius: 10px; border: none; cursor: pointer; position: relative; transition: background 0.2s; }
+  .toggle.on { background: var(--accent); }
+  .toggle.off { background: var(--border); }
+  .toggle::after { content: ''; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: #fff; top: 2px; transition: left 0.2s; }
+  .toggle.on::after { left: 18px; }
+  .toggle.off::after { left: 2px; }
+  
+  /* API Key section */
+  .api-key-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; font-family: monospace; font-size: 13px; word-break: break-all; color: var(--accent2); margin: 12px 0; display: none; }
+  .api-key-box.visible { display: block; }
+  
+  .btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 13px; cursor: pointer; transition: all 0.2s; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: 0.85; }
+  
+  .input { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; width: 100%; }
+  .input:focus { border-color: var(--accent); }
+  
+  /* Section titles */
+  .section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text2); margin-bottom: 12px; margin-top: 20px; }
+  
+  /* Login screen */
+  .login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .login-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 40px; width: 360px; text-align: center; }
+  .login-box h1 { font-size: 28px; margin-bottom: 8px; }
+  .login-box p { color: var(--text2); font-size: 14px; margin-bottom: 24px; }
+  .login-box input { margin-bottom: 12px; }
+  .login-box .btn { width: 100%; }
+  .error-msg { color: var(--danger); font-size: 12px; margin-top: 8px; display: none; }
+  
+  /* Utility */
+  .hidden { display: none !important; }
+  .mb { margin-bottom: 12px; }
+  .mt { margin-top: 12px; }
+  
+  /* Model selector */
+  #goal-select { appearance: none; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 13px; outline: none; cursor: pointer; }
+  #goal-select:focus { border-color: var(--accent); }
+  
+  /* Loading indicator */
+  .loading-dots { display: inline-flex; gap: 4px; }
+  .loading-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--text2); animation: bounce 1.2s infinite; }
+  .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-screen" class="login-screen">
+  <div class="login-box">
+    <div class="logo" style="justify-content:center;margin-bottom:16px;">LLM<span>Route</span></div>
+    <h1>Welcome back</h1>
+    <p>AI Model Router for indie hackers</p>
+    <input class="input" type="password" id="password-input" placeholder="Admin password" onkeydown="if(event.key==='Enter')login()">
+    <button class="btn btn-primary" onclick="login()">Sign In</button>
+    <div class="error-msg" id="login-error">Incorrect password</div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <nav>
+    <div class="logo">LLM<span>Route</span></div>
+    <div class="nav-right">
+      <div class="cost-ticker">
+        <div><span>Total Cost</span> <strong id="total-cost">$0.00</strong></div>
+        <div><span>Requests</span> <strong id="total-req">0</strong></div>
+      </div>
+    </div>
+  </nav>
+  
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('chat')">💬 Chat</button>
+    <button class="tab" onclick="showTab('analytics')">📊 Analytics</button>
+    <button class="tab" onclick="showTab('models')">⚙️ Models</button>
+    <button class="tab" onclick="showTab('keys')">🔑 API Keys</button>
+  </div>
+  
+  <div class="main">
+    <!-- CHAT PANEL -->
+    <div id="tab-chat" class="panel">
+      <div id="chat-messages"></div>
+      <div class="chat-input-area">
+        <form class="chat-form" onsubmit="sendMessage(event)">
+          <textarea id="chat-input" placeholder="Ask anything... e.g. 'Explain WebSockets in simple terms'" rows="1" oninput="autoGrow(this)"></textarea>
+          <button type="submit" class="send-btn" id="send-btn">Send</button>
+        </form>
+        <div class="chat-options">
+          <label style="font-size:11px;color:var(--text2);margin-right:4px;">Goal:</label>
+          <select id="goal-select" onchange="setGoal(this.value)">
+            <option value="answer">Answer</option>
+            <option value="code">Code</option>
+            <option value="reasoning">Reasoning</option>
+            <option value="fast">Fast</option>
+            <option value="creative">Creative</option>
+          </select>
+          <div style="margin-left:auto;display:flex;gap:8px;">
+            <input class="input" id="openai-key" placeholder="OpenAI Key (optional)" style="width:160px;" onkeydown="event.stopPropagation()">
+            <input class="input" id="anthropic-key" placeholder="Anthropic Key (optional)" style="width:160px;" onkeydown="event.stopPropagation()">
+            <input class="input" id="gemini-key" placeholder="Gemini Key (optional)" style="width:140px;" onkeydown="event.stopPropagation()">
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- ANALYTICS PANEL -->
+    <div id="tab-analytics" class="panel hidden">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Cost (7d)</div>
+          <div class="stat-value accent" id="stat-cost">$0.00</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Requests (7d)</div>
+          <div class="stat-value success" id="stat-req">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Cost/Req</div>
+          <div class="stat-value warning" id="stat-avg">$0.00</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Top Provider</div>
+          <div class="stat-value" id="stat-top">—</div>
+        </div>
+      </div>
+      
+      <div class="chart-container">
+        <div class="chart-title">Daily Cost (USD)</div>
+        <div class="bar-chart" id="bar-chart"></div>
+      </div>
+      
+      <div class="section-title">By Provider</div>
+      <div id="provider-breakdown"></div>
+    </div>
+    
+    <!-- MODELS PANEL -->
+    <div id="tab-models" class="panel hidden">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:16px;">Toggle models to enable/disable routing candidates. Disabled models won't be selected by the router.</p>
+      <div id="model-list"></div>
+    </div>
+    
+    <!-- API KEYS PANEL -->
+    <div id="tab-keys" class="panel hidden">
+      <p style="font-size:13px;color:var(--text2);margin-bottom:16px;">Generate API keys for your users or integrations. Keys are passed via <code style="color:var(--accent);font-size:12px;">X-API-Key</code> header.</p>
+      <button class="btn btn-primary mb" onclick="generateKey()">+ Generate API Key</button>
+      <div class="api-key-box" id="new-key-display"></div>
+      <div class="section-title">Example Request</div>
+      <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;font-family:monospace;color:var(--text2);overflow-x:auto;margin-top:8px;">curl -X POST http://localhost:3000/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_KEY" \
+  -d '{"prompt":"Hello world","goal":"answer"}'</pre>
+      <div class="section-title">Response Format</div>
+      <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;font-family:monospace;color:var(--text2);overflow-x:auto;margin-top:8px;">{
+  "model": "gpt-4o-mini",
+  "provider": "openai",
+  "response": "Hello! How can I help...",
+  "usage": {
+    "inputTokens": 142,
+    "outputTokens": 89,
+    "costUSD": 0.000069,
+    "latencyMs": 820
+  },
+  "routing": {
+    "mode": "answer",
+    "candidates": ["gpt-4o-mini", "claude-3-5-haiku"],
+    "chosenReason": "strong at answer, preferred provider"
+  }
+}</pre>
+    </div>
+    
+    <!-- RIGHT PANEL -->
+    <div class="panel-right" id="right-panel">
+      <div class="section-title">Quick Stats</div>
+      <div class="stat-card mb">
+        <div class="stat-label">Active Models</div>
+        <div class="stat-value success" id="active-models">0</div>
+      </div>
+      <div class="stat-card mb">
+        <div class="stat-label">Cached Responses</div>
+        <div class="stat-value" style="font-size:16px;color:var(--text2);" id="cache-info">—</div>
+      </div>
+      
+      <div class="section-title">Model Status</div>
+      <div id="model-status"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let token = localStorage.getItem('llmtoken') || '';
+let currentGoal = 'answer';
+let models = [];
+
+async function login() {
+  const pw = document.getElementById('password-input').value;
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw })
+    });
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    token = data.token;
+    localStorage.setItem('llmtoken', token);
+    showApp();
+  } catch {
+    document.getElementById('login-error').style.display = 'block';
+  }
+}
+
+function showApp() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  loadAll();
+}
+
+function authHeaders() {
+  return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('[id^="tab-"]').forEach(p => p.classList.add('hidden'));
+  document.getElementById(`tab-${name}`).classList.remove('hidden');
+  event.target.classList.add('active');
+  if (name === 'analytics') loadAnalytics();
+  if (name === 'models') loadModels();
+}
+
+function autoGrow(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
+function setGoal(v) { currentGoal = v; }
+
+async function sendMessage(e) {
+  e.preventDefault();
+  const input = document.getElementById('chat-input');
+  const prompt = input.value.trim();
+  if (!prompt) return;
+  
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  
+  // Add user message
+  addMessage('user', prompt);
+  input.value = '';
+  input.style.height = 'auto';
+  
+  // Add loading
+  const loadingId = addLoadingMessage();
+  
+  try {
+    const apiKeys = {
+      openai: document.getElementById('openai-key').value,
+      anthropic: document.getElementById('anthropic-key').value,
+      gemini: document.getElementById('gemini-key').value,
+    };
+    
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ 
+        prompt, 
+        goal: currentGoal, 
+        maxTokens: 2048,
+        temperature: 0.7,
+        apiKeys
+      })
+    });
+    
+    removeMessage(loadingId);
+    
+    if (!res.ok) {
+      const err = await res.json();
+      addMessage('error', err.error || 'Request failed');
+      return;
+    }
+    
+    const data = await res.json();
+    addMessage('assistant', data.response, data);
+    updateCostDisplay();
+  } catch (err) {
+    removeMessage(loadingId);
+    addMessage('error', err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function addMessage(type, content, data = null) {
+  const msgs = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = `msg msg-${type === 'error' ? 'error' : type}`;
+  
+  if (type === 'user') {
+    div.innerHTML = `<div class="msg-bubble">${escapeHtml(content)}</div>`;
+  } else if (type === 'error') {
+    div.innerHTML = `<div class="msg-bubble">${escapeHtml(content)}</div>`;
+  } else {
+    const meta = data ? `<div class="msg-meta">
+      <span>${data.provider}/${data.model}</span>
+      <span>${data.usage.costUSD.toFixed(6)} USD</span>
+      <span>${data.usage.latencyMs}ms</span>
+    </div>
+    <div class="msg-routing">✓ routed via ${data.routing.chosenReason}</div>
+    <div class="model-pills">${data.routing.candidates.map(c => {
+      const m = models.find(m => m.id === c);
+      return m ? `<span class="model-pill ${m.provider}">${m.id}</span>` : `<span>${c}</span>`;
+    }).join('')}</div>` : '';
+    div.innerHTML = `<div class="msg-bubble">${escapeHtml(content)}</div>${meta}`;
+  }
+  
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div.id;
+}
+
+function addLoadingMessage() {
+  const msgs = document.getElementById('chat-messages');
+  const id = 'msg-' + Date.now();
+  const div = document.createElement('div');
+  div.className = 'msg msg-assistant';
+  div.id = id;
+  div.innerHTML = `<div class="msg-bubble"><div class="loading-dots"><span></span><span></span><span></span></div></div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return id;
+}
+
+function removeMessage(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function loadAll() {
+  await Promise.all([loadModels(), loadAnalytics(), updateCostDisplay()]);
+}
+
+async function loadModels() {
+  const res = await fetch('/models', { headers: authHeaders() });
+  models = await res.json();
+  
+  const list = document.getElementById('model-list');
+  list.innerHTML = models.map(m => `
+    <div class="model-card">
+      <div class="model-info">
+        <div class="model-name">${m.name}</div>
+        <div class="model-meta">${m.provider} / ${m.model} — $${m.costPer1KInput}/1K in, $${m.costPer1KOutput}/1K out</div>
+      </div>
+      <button class="toggle ${m.enabled ? 'on' : 'off'}" onclick="toggleModel('${m.id}')"></button>
+    </div>
+  `).join('');
+  
+  document.getElementById('active-models').textContent = models.filter(m => m.enabled).length;
+  
+  const status = document.getElementById('model-status');
+  status.innerHTML = models.filter(m => m.enabled).slice(0,4).map(m => `
+    <div class="provider-row">
+      <div class="provider-dot" style="background:${providerColor(m.provider)}"></div>
+      <div class="provider-name">${m.name}</div>
+      <div class="provider-req">~${m.avgLatencyMs}ms</div>
+    </div>
+  `).join('');
+}
+
+async function toggleModel(id) {
+  const m = models.find(m => m.id === id);
+  if (!m) return;
+  await fetch(`/models/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ enabled: !m.enabled })
+  });
+  loadModels();
+}
+
+async function loadAnalytics() {
+  const res = await fetch('/analytics?days=7', { headers: authHeaders() });
+  const data = await res.json();
+  
+  document.getElementById('stat-cost').textContent = '$' + data.totalCost.toFixed(4);
+  document.getElementById('stat-req').textContent = data.totalRequests;
+  document.getElementById('stat-avg').textContent = data.totalRequests ? '$' + (data.totalCost / data.totalRequests).toFixed(4) : '$0.00';
+  
+  const topProvider = Object.entries(data.byProvider).sort((a,b) => b[1].requests - a[1].requests)[0];
+  document.getElementById('stat-top').textContent = topProvider ? topProvider[0] : '—';
+  
+  // Bar chart
+  const chart = document.getElementById('bar-chart');
+  const max = Math.max(...data.dailyCosts.map(d => d.cost), 0.01);
+  chart.innerHTML = data.dailyCosts.map(d => {
+    const h = Math.max((d.cost / max) * 80, 4);
+    return `<div class="bar" style="height:${h}px;background:var(--accent);" title="${d.date}: $${d.cost.toFixed(4)}"></div>`;
+  }).join('');
+  
+  // Provider breakdown
+  const pb = document.getElementById('provider-breakdown');
+  pb.innerHTML = Object.entries(data.byProvider)
+    .sort((a,b) => b[1].cost - a[1].cost)
+    .map(([name, v]) => `
+      <div class="provider-row">
+        <div class="provider-dot" style="background:${providerColor(name)}"></div>
+        <div class="provider-name">${name}</div>
+        <div class="provider-req">${v.requests} reqs</div>
+        <div class="provider-cost">$${v.cost.toFixed(4)}</div>
+      </div>
+    `).join('') || '<p style="font-size:13px;color:var(--text2);">No requests yet</p>';
+}
+
+async function updateCostDisplay() {
+  const res = await fetch('/analytics?days=7', { headers: authHeaders() });
+  const data = await res.json();
+  document.getElementById('total-cost').textContent = '$' + data.totalCost.toFixed(4);
+  document.getElementById('total-req').textContent = data.totalRequests;
+}
+
+async function generateKey() {
+  const label = prompt('Label for this API key (e.g. "Production", "Test App"):') || 'Untitled';
+  const res = await fetch('/auth/api-key', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ label })
+  });
+  const data = await res.json();
+  const box = document.getElementById('new-key-display');
+  box.textContent = data.apiKey;
+  box.classList.add('visible');
+}
+
+function providerColor(p) {
+  return { openai: '#6affc7', anthropic: '#ff9a6a', gemini: '#6ab0ff' }[p] || '#888';
+}
+
+// Auto-login if token exists
+if (token) showApp();
+</script>
+</body>
+</html>
